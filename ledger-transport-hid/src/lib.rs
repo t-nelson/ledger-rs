@@ -36,9 +36,19 @@ pub struct TransportNativeHID {
     device: Mutex<HidDevice>,
 }
 
+#[cfg(feature = "hidapi-backend-linux-static-hidraw")]
+fn usage_page(device_info: &DeviceInfo) -> u16 {
+    device_info.usage_page()
+}
+
+#[cfg(feature = "hidapi-backend-linux-static-libusb")]
+fn usage_page(_device_info: &DeviceInfo) -> u16 {
+    LEDGER_USAGE_PAGE
+}
+
 impl TransportNativeHID {
     fn is_ledger(dev: &DeviceInfo) -> bool {
-        dev.vendor_id() == LEDGER_VID && dev.usage_page() == LEDGER_USAGE_PAGE
+        dev.vendor_id() == LEDGER_VID && usage_page(dev) == LEDGER_USAGE_PAGE
     }
 
     /// Get a list of ledger devices available
@@ -243,7 +253,7 @@ mod integration_tests {
                 device_info.path(),
                 device_info.vendor_id(),
                 device_info.product_id(),
-                device_info.usage_page(),
+                usage_page(device_info),
                 device_info.interface_number(),
                 device_info
                     .manufacturer_string()
