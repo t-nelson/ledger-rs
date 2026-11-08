@@ -37,24 +37,38 @@ pub struct TransportNativeHID {
 }
 
 #[cfg(feature = "hidapi-backend-linux-static-hidraw")]
-fn usage_page(device_info: &DeviceInfo) -> u16 {
-    device_info.usage_page()
+fn usage_page(_api: &HidApi, device_info: &DeviceInfo) -> Option<u16> {
+    Some(device_info.usage_page())
 }
 
 #[cfg(feature = "hidapi-backend-linux-static-libusb")]
-fn usage_page(_device_info: &DeviceInfo) -> u16 {
-    LEDGER_USAGE_PAGE
+fn usage_page(api: &HidApi, device_info: &DeviceInfo) -> Option<u16> {
+    // the libusb backend does not automatically provide the usage page. query it directly
+    let device = device_info.open_device(api).ok()?;
+    let mut descriptor_buf = [0u8; 4096];
+    let bytes_read = device.get_report_descriptor(&mut descriptor_buf).ok()?;
+    if bytes_read == 0 {
+        return None;
+    }
+    let items = hid_report::parse((&descriptor_buf[..bytes_read]).into_iter().copied());
+    for item in items {
+        if let hid_report::ReportItem::UsagePage(usage_page) = item {
+            let bytes: [u8; 2] = usage_page.data().try_into().ok()?;
+            return Some(u16::from_le_bytes(bytes));
+        }
+    }
+    None
 }
 
 impl TransportNativeHID {
-    fn is_ledger(dev: &DeviceInfo) -> bool {
-        dev.vendor_id() == LEDGER_VID && usage_page(dev) == LEDGER_USAGE_PAGE
+    fn is_ledger(api: &HidApi, dev: &DeviceInfo) -> bool {
+        dev.vendor_id() == LEDGER_VID && usage_page(api, dev) == Some(LEDGER_USAGE_PAGE)
     }
 
     /// Get a list of ledger devices available
     pub fn list_ledgers(api: &HidApi) -> impl Iterator<Item = &DeviceInfo> {
         api.device_list()
-            .filter(|dev| Self::is_ledger(dev))
+            .filter(|dev| Self::is_ledger(api, dev))
     }
 
     /// Create a new HID transport, connecting to the first ledger found
@@ -253,7 +267,7 @@ mod integration_tests {
                 device_info.path(),
                 device_info.vendor_id(),
                 device_info.product_id(),
-                usage_page(device_info),
+                super::usage_page(&api, device_info).expect("usage page"),
                 device_info.interface_number(),
                 device_info
                     .manufacturer_string()
